@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# TEMP
+SANCOV=/home/aki/src/llvm/projects/compiler-rt/lib/sanitizer_common/scripts/sancov.py
+
 set -e
 
 fail() {
@@ -36,21 +39,54 @@ done
 
 test -n "$WORK" || fail "You need to give a work directory with --work. This is where needed tools, data and results will be put. You can use the same one across runs."
 test -n "$TARGET" || fail "You need to give a target binary with --target"
+test -d "$SAMPLES" || fail "You need to give a samples directory (it can be empty, though)"
 
 mkdir -p $WORK
 cd $WORK
-mkdir -p bin
-mkdir -p src
+mkdir -p bin src fuzz fuzz-ng
+
 echo "Checking and possibly building tools on the first run. This may take a few minutes."
 test -x bin/ol || ( cd src; git clone https://github.com/aoh/owl-lisp.git && cd owl-lisp && make PREFIX=$WORK install; )
 test -x bin/radamsa || ( cd src; git clone https://github.com/aoh/radamsa && cd radamsa ln -s ../owl-lisp && make PREFIX=$WORK install; ) &
 test -x bin/lines || ( cd src; git clone https://github.com/aoh/lines && cd lines && ln -s ../owl-lisp && make PREFIX=$WORK install; ) &
 wait
+SUFFIX=$(ls $SAMPLES | head -n 1 | sed -e 's/.*\.//')
 
 PATH=$WORK/bin:$PATH
 
 echo "SAMPLES=$SAMPLES"
 echo "TARGET=$TARGET"
 echo "WORK=$WORK"
+echo "SUFFIX=$SUFFIX"
+
+
+##
+## Import and sanitize sample paths to work folder
+##
+
+for foo in $SAMPLES/*
+do
+   SUM=`md5sum $foo | sed -e 's/ .*//'`
+   cp -v "$foo" "fuzz/$SUM.$SUFFIX"
+done
+
+
+##
+## Compute initial coverages
+##
+
+cd $WORK/fuzz
+
+for foo in *.$SUFFIX
+do
+   test -f $foo.coverage && continue
+   # do this in parallel soonish
+   (ulimit -t 2;
+    ASAN_OPTIONS=detect_leaks=0:coverage=1 $BINARY "$foo" 2>"$foo.asan" > /dev/null &
+    PID=$!;
+    wait;
+    $SANCOV print *.$PID.sancov > "$foo.coverage";)
+done
+
 
 
