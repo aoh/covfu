@@ -21,7 +21,6 @@ THREADS=1
 
 while [ $# != 0 ]
 do
-   echo $# $WORK $SAMPLES $TARGET
    case "$1" in
       (--help|-h)
          echo "Usage: covfu --samples <samples-dir> --work <fuzzing-dir> --target <clang-coverage-instrumented-binary>";
@@ -51,7 +50,7 @@ test -d "$SAMPLES" || fail "You need to give a samples directory"
 
 mkdir -p $WORK
 cd $WORK
-mkdir -p bin src fuzz/next issues
+mkdir -p bin src fuzz/next fuzz/new issues
 
 echo "Checking and possibly building tools on the first run. This may take a few minutes."
 test -x bin/ol || ( cd src; git clone https://github.com/aoh/owl-lisp.git && cd owl-lisp && make PREFIX=$WORK install; )
@@ -94,32 +93,27 @@ cd $WORK/fuzz
 while true
 do
 
-   radamsa -o fuzz-%n.$SUFFIX -n 100 *.$SUFFIX
+   radamsa -o new/fuzz-%n.$SUFFIX -n 100 *.$SUFFIX &
 
-   #echo -n 'Round ('
    ## Compute missing coverages
    for foo in *.$SUFFIX
    do
       test -f $foo.coverage && continue
       # do this in parallel soonish
-      #echo -n "o"
       (ulimit -t 10;
        ASAN_OPTIONS=detect_leaks=0:coverage=1 $TARGET "$foo" 2>"$foo.asan" > /dev/null &
        PID=$!;
        wait;
-       #$SANCOV print *.$PID.sancov > "$foo.coverage";
        for LOG in *.$PID.sancov
        do
          NAME=$(echo $LOG | sed -e 's/\..*//')
          od -w4 -t x4 $LOG  | sed -e "s/.* /$NAME-/" | grep $NAME >> "$foo.coverage"
        done;
        rm *.$PID.sancov;
-       #wc -l "$foo.coverage";
        ) &
        waitnjobs $THREADS
    done
    wait
-   #echo ')'
 
    ## Check for issues
    for log in $(grep "ERROR: Addr" *.asan | sed -e 's/:.*//' | uniq)
@@ -157,6 +151,8 @@ do
    cd ..
 
    echo "$(date +'%Y.%m.%d %H:%M') $(lines --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
+   
+   mv new/* .
 done
 
 
