@@ -119,7 +119,7 @@ do
    for log in $(grep "ERROR: Addr" *.asan | sed -e 's/:.*//' | uniq)
    do
       FILE=$(echo $log | sed -e 's/\.asan//')
-      CAUSE=$(grep "ERROR: Addr" $log | head -n 1 | sed -re 's/.*ERROR: AddressSanitizer: ([^ ]*).*pc [^ ]*([^ ]{3}).*/\1_\2/' | sed -e 's/[^a-zA-Z0-9_-]/_/')
+      CAUSE=$(grep "ERROR: Addr" $log | head -n 1 | sed -re 's/.*ERROR: AddressSanitizer: ([^ ]*).*pc [^ ]*([^ ]{3}).*/\1_\2/' | sed -e 's/[^a-zA-Z0-9_-]/_/g')
       cp $FILE ../issues/$CAUSE.$SUFFIX
       cp $log ../issues/$CAUSE.$SUFFIX.asan
    done
