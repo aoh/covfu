@@ -3,17 +3,24 @@
 # TEMP
 SANCOV=/home/aki/src/llvm/projects/compiler-rt/lib/sanitizer_common/scripts/sancov.py
 
-set -e
-
 fail() {
    echo "FAIL: $@"
    exit 1;
+}
+
+waitnjobs() {
+   while true
+   do
+      test $(jobs | grep Running | wc -l) -lt $1 && break
+      sleep 0.2
+   done
 }
 
 WORK=""
 SAMPLES=""
 OUTPUT=""
 BLACKLIST=WHITELIST
+THREADS=1
 
 while [ $# != 0 ]
 do
@@ -34,6 +41,9 @@ do
       (--blacklist|-b)
          BLACKLIST="$2"
          shift 2;;
+      (--processes|-p)
+         THREADS=$2
+         shift 2;;
       (*)
          # what this flag?
          echo "WTF '$1'"
@@ -47,7 +57,7 @@ test -d "$SAMPLES" || fail "You need to give a samples directory"
 
 mkdir -p $WORK
 cd $WORK
-mkdir -p bin src fuzz/next
+mkdir -p bin src fuzz/next issues
 
 echo "Checking and possibly building tools on the first run. This may take a few minutes."
 test -x bin/ol || ( cd src; git clone https://github.com/aoh/owl-lisp.git && cd owl-lisp && make PREFIX=$WORK install; )
@@ -62,6 +72,7 @@ echo "SAMPLES=$SAMPLES"
 echo "TARGET=$TARGET"
 echo "WORK=$WORK"
 echo "SUFFIX=$SUFFIX"
+echo "THREADS=$THREADS"
 
 
 ##
@@ -91,12 +102,14 @@ do
 
    radamsa -o fuzz-%n.$SUFFIX -n 100 *.$SUFFIX
 
+   #echo -n 'Round ('
    ## Compute missing coverages
    for foo in *.$SUFFIX
    do
       test -f $foo.coverage && continue
       # do this in parallel soonish
-      (ulimit -t 2;
+      #echo -n "o"
+      (ulimit -t 10;
        ASAN_OPTIONS=detect_leaks=0:coverage=1 $TARGET "$foo" 2>"$foo.asan" > /dev/null &
        PID=$!;
        wait;
@@ -108,14 +121,20 @@ do
        done;
        rm *.$PID.sancov;
        #wc -l "$foo.coverage";
-       )
+       ) &
+       waitnjobs $THREADS
    done
+   wait
+   #echo ')'
 
    ## Check for issues
-   grep "ERROR: Addr" *.asan \
-      | grep -vE "$BLACKLIST" \
-      | grep -v "AddressSanitizer failed to allocate " \
-      | grep ERROR && exit 0
+   for log in $(grep "ERROR: Addr" *.asan | sed -e 's/:.*//' | uniq)
+   do
+      FILE=$(echo $log | sed -e 's/\.asan//')
+      CAUSE=$(grep "ERROR: Addr" $log | head -n 1 | sed -re 's/.*ERROR: AddressSanitizer: ([^ ]*).*pc [^ ]*([^ ]{3}).*/\1_\2/' | sed -e 's/[^a-zA-Z0-9_-]/_/')
+      cp $FILE ../issues/$CAUSE.$SUFFIX
+      cp $log ../issues/$CAUSE.$SUFFIX.asan
+   done
 
    ## Compute the next generation to fuzz/next
    for foo in $(lines --cover *.coverage)
@@ -143,7 +162,7 @@ do
    done
    cd ..
 
-   echo "$(date +'%Y.%m.%d %H:%M') $(lines --union *.coverage | wc -l) blocks, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
+   echo "$(date +'%Y.%m.%d %H:%M') $(lines --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
 done
 
 
