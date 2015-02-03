@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# TEMP
-SANCOV=/home/aki/src/llvm/projects/compiler-rt/lib/sanitizer_common/scripts/sancov.py
-
 fail() {
    echo "FAIL: $@"
    exit 1;
@@ -37,9 +34,6 @@ do
          shift 2;;
       (--target|-t)
          TARGET=$(readlink -f $2)
-         shift 2;;
-      (--blacklist|-b)
-         BLACKLIST="$2"
          shift 2;;
       (--processes|-p)
          THREADS=$2
