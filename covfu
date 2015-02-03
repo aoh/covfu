@@ -13,6 +13,7 @@ fail() {
 WORK=""
 SAMPLES=""
 OUTPUT=""
+BLACKLIST=WHITELIST
 
 while [ $# != 0 ]
 do
@@ -30,6 +31,9 @@ do
       (--target|-t)
          TARGET=$(readlink -f $2)
          shift 2;;
+      (--blacklist|-b)
+         BLACKLIST="$2"
+         shift 2;;
       (*)
          # what this flag?
          echo "WTF '$1'"
@@ -39,11 +43,11 @@ done
 
 test -n "$WORK" || fail "You need to give a work directory with --work. This is where needed tools, data and results will be put. You can use the same one across runs."
 test -n "$TARGET" || fail "You need to give a target binary with --target"
-test -d "$SAMPLES" || fail "You need to give a samples directory (it can be empty, though)"
+test -d "$SAMPLES" || fail "You need to give a samples directory"
 
 mkdir -p $WORK
 cd $WORK
-mkdir -p bin src fuzz fuzz-ng
+mkdir -p bin src fuzz/next
 
 echo "Checking and possibly building tools on the first run. This may take a few minutes."
 test -x bin/ol || ( cd src; git clone https://github.com/aoh/owl-lisp.git && cd owl-lisp && make PREFIX=$WORK install; )
@@ -72,21 +76,74 @@ done
 
 
 ##
-## Compute initial coverages
+## Test loop
 ##
+
+# fuzz some new files based on current files (initially samples)
+# compute coverages of old and new files
+# take a good subset of files which cover the whole set
+# rinse and repeat
 
 cd $WORK/fuzz
 
-for foo in *.$SUFFIX
+while true
 do
-   test -f $foo.coverage && continue
-   # do this in parallel soonish
-   (ulimit -t 2;
-    ASAN_OPTIONS=detect_leaks=0:coverage=1 $BINARY "$foo" 2>"$foo.asan" > /dev/null &
-    PID=$!;
-    wait;
-    $SANCOV print *.$PID.sancov > "$foo.coverage";)
-done
 
+   radamsa -o fuzz-%n.$SUFFIX -n 100 *.$SUFFIX
+
+   ## Compute missing coverages
+   for foo in *.$SUFFIX
+   do
+      test -f $foo.coverage && continue
+      # do this in parallel soonish
+      (ulimit -t 2;
+       ASAN_OPTIONS=detect_leaks=0:coverage=1 $TARGET "$foo" 2>"$foo.asan" > /dev/null &
+       PID=$!;
+       wait;
+       #$SANCOV print *.$PID.sancov > "$foo.coverage";
+       for LOG in *.$PID.sancov
+       do
+         NAME=$(echo $LOG | sed -e 's/\..*//')
+         od -w4 -t x4 $LOG  | sed -e "s/.* /$NAME-/" | grep $NAME >> "$foo.coverage"
+       done;
+       rm *.$PID.sancov;
+       #wc -l "$foo.coverage";
+       )
+   done
+
+   ## Check for issues
+   grep "ERROR: Addr" *.asan \
+      | grep -vE "$BLACKLIST" \
+      | grep -v "AddressSanitizer failed to allocate " \
+      | grep ERROR && exit 0
+
+   ## Compute the next generation to fuzz/next
+   for foo in $(lines --cover *.coverage)
+   do
+      FILE=$(echo "$foo" | sed -e 's/\.coverage$//')
+      mv "$foo" "$FILE" next
+   done
+
+   ## Clear old generation
+   rm *.*
+
+   ## Sanitize the names of next generation files (to avoid collisions)
+   cd next
+   # rename and move files from current generation
+   for file in fuzz-*.$SUFFIX 
+   do
+      SUM=`md5sum $file | sed -e 's/ .*//'` 
+      mv "$file" "../$SUM.$SUFFIX" 
+      mv "$file.coverage" "../$SUM.$SUFFIX.coverage" 
+   done
+   # move files form previous generation
+   for file in *.$SUFFIX
+   do
+      mv $file $file.coverage ..
+   done
+   cd ..
+
+   echo "$(date +'%Y.%m.%d %H:%M') $(lines --union *.coverage | wc -l) blocks, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
+done
 
 
