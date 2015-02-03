@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -e
+
+fail() {
+   echo "FAIL: $@"
+   exit 1;
+}
+
+WORK=""
+SAMPLES=""
+OUTPUT=""
+
+while [ $# != 0 ]
+do
+   echo $# $WORK $SAMPLES $TARGET
+   case "$1" in
+      (--help|-h)
+         echo "Usage: covfu --samples <samples-dir> --work <fuzzing-dir> --target <clang-coverage-instrumented-binary>";
+         exit 0;;
+      (--samples|-s)
+         SAMPLES=$(readlink -f $2)
+         shift 2;;
+      (--work|-w)
+         WORK=$(readlink -f $2)
+         shift 2;;
+      (--target|-t)
+         TARGET=$(readlink -f $2)
+         shift 2;;
+      (*)
+         # what this flag?
+         echo "WTF '$1'"
+         exit 1;;
+   esac
+done
+
+test -n "$WORK" || fail "You need to give a work directory with --work. This is where needed tools, data and results will be put. You can use the same one across runs."
+test -n "$TARGET" || fail "You need to give a target binary with --target"
+
+mkdir -p $WORK
+cd $WORK
+mkdir -p bin
+mkdir -p src
+echo "Checking and possibly building tools on the first run. This may take a few minutes."
+test -x bin/ol || ( cd src; git clone https://github.com/aoh/owl-lisp.git && cd owl-lisp && make PREFIX=$WORK install; )
+test -x bin/radamsa || ( cd src; git clone https://github.com/aoh/radamsa && cd radamsa ln -s ../owl-lisp && make PREFIX=$WORK install; ) &
+test -x bin/lines || ( cd src; git clone https://github.com/aoh/lines && cd lines && ln -s ../owl-lisp && make PREFIX=$WORK install; ) &
+wait
+
+PATH=$WORK/bin:$PATH
+
+echo "SAMPLES=$SAMPLES"
+echo "TARGET=$TARGET"
+echo "WORK=$WORK"
+
+
