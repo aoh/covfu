@@ -34,7 +34,7 @@ do
       (--target|-t)
          TARGET="$2"
          shift 2;;
-      (--processes|-p)
+      (--processes|-j)
          THREADS=$2
          shift 2;;
       (*)
@@ -90,10 +90,17 @@ done
 
 cd $WORK/fuzz
 
+OL=$WORK/bin/ol
+
+START=$($OL -e '(time-ms)')
+SETSIZE=100
+TESTS=0
+RATE=0
+
 while true
 do
 
-   radamsa -o new/fuzz-%n.$SUFFIX -n 100 *.$SUFFIX &
+   radamsa -o new/fuzz-%n.$SUFFIX -n $SETSIZE *.$SUFFIX &
 
    ## Compute missing coverages
    for foo in *.$SUFFIX
@@ -101,19 +108,24 @@ do
       test -f $foo.coverage && continue
       # do this in parallel soonish
       (ulimit -t 10;
-       ASAN_OPTIONS=detect_leaks=0:coverage=1 $TARGET "$foo" 2>"$foo.asan" > /dev/null &
+       mkdir $foo.dir;
+       cp $foo $foo.dir;
+       cd $foo.dir;
+       ASAN_OPTIONS=detect_leaks=0:coverage=1 $TARGET "$foo" 2>"../$foo.asan" > /dev/null &
        PID=$!;
        wait;
        for LOG in *.$PID.sancov
        do
          NAME=$(echo $LOG | sed -e 's/\..*//')
-         od -w4 -t x4 $LOG  | sed -e "s/.* /$NAME-/" | grep $NAME >> "$foo.coverage"
+         od -w4 -t x4 $LOG  | sed -e "s/.* /$NAME-/" | grep $NAME >> "../$foo.coverage"
        done;
-       rm *.$PID.sancov;
+       cd ..;
        ) &
        waitnjobs $THREADS
    done
    wait
+   chmod -R u+rw fuzz-*.dir
+   rm -rf *.dir
 
    ## Check for issues
    for log in $(grep "ERROR: Addr" *.asan | sed -e 's/:.*//' | uniq)
@@ -149,10 +161,14 @@ do
       mv $file $file.coverage ..
    done
    cd ..
-
-   echo "$(date +'%Y.%m.%d %H:%M') $(lines --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
    
    mv new/* .
+
+   TESTS=$($OL -e "(+ $SETSIZE $TESTS)")
+   RATE=$($OL -e "(round (/ (- (time-ms) $START) $TESTS))")
+
+   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $(lines --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
+
 done
 
 
