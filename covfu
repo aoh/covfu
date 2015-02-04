@@ -161,13 +161,15 @@ do
       mv $file $file.coverage ..
    done
    cd ..
-   
+  
+   POOLSIZE=$(ls *.$SUFFIX | wc -l)
+
    mv new/* .
 
    TESTS=$($OL -e "(+ $SETSIZE $TESTS)")
    RATE=$($OL -e "(round (/ (- (time-ms) $START) $TESTS))")
 
-   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $(lines --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $(ls *.$SUFFIX | wc -l) for $TARGET"
+   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $(lines --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $POOLSIZE for $TARGET"
 
 done
 
