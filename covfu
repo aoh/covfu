@@ -127,7 +127,7 @@ do
        waitnjobs $THREADS
    done
    wait
-   chmod -R u+rw fuzz-*.dir
+   chmod -R u+rwx fuzz-*.dir
    rm -rf *.dir
 
    ## Check for issues
