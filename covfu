@@ -19,6 +19,7 @@ OUTPUT=""
 BLACKLIST=WHITELIST
 THREADS=1
 SETSIZE=100
+FUZZER=radamsa
 
 while [ $# != 0 ]
 do
@@ -40,6 +41,9 @@ do
          shift 2;;
       (--size|-n)
          SETSIZE=$2
+         shift 2;;
+      (--fuzzer|-f)
+         FUZZER=$2
          shift 2;;
       (*)
          # what this flag?
@@ -103,7 +107,7 @@ RATE=0
 while true
 do
 
-   radamsa -o new/fuzz-%n.$SUFFIX -n $SETSIZE *.$SUFFIX &
+   $FUZZER -o new/fuzz-%n.$SUFFIX -n $SETSIZE *.$SUFFIX &
 
    ## Compute missing coverages
    for foo in *.$SUFFIX
