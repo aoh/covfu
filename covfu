@@ -167,7 +167,7 @@ do
    # rename and move files from current generation
    for file in fuzz-*.$SUFFIX 
    do
-      echo "$file" | grep "\*" && break # no matches
+      echo "$file" | grep -q "\*" && break # no matches
       SUM=`md5sum $file | sed -e 's/ .*//'` 
       mv "$file" "../$SUM.$SUFFIX" 
       mv "$file.coverage" "../$SUM.$SUFFIX.coverage" 
