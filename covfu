@@ -19,31 +19,49 @@ OUTPUT=""
 BLACKLIST=WHITELIST
 THREADS=1
 SETSIZE=100
+TIMEOUT=10
 FUZZER=""
+
+USAGE="Usage: covfu --samples <samples-dir> --work <fuzzing-dir> --timeout <timeout($TIMEOUT)> --setsize <setsize($SETSIZE)> --fuzzer <fuzzer-executable> --target <instrumented-target-command> -j <njobs($THREADS)>"
+
+test $# = 0 && echo "$USAGE" && exit 0
 
 while [ $# != 0 ]
 do
    case "$1" in
       (--help|-h)
-         echo "Usage: covfu --samples <samples-dir> --work <fuzzing-dir> --target <clang-coverage-instrumented-binary>";
+         echo "$USAGE"
          exit 0;;
       (--samples|-s)
+         test $# == 1 && fail "$1 needs an argument"
          SAMPLES=$(readlink -f $2)
+         test -d "$SAMPLES" || fail "$SAMPLES is not a directory"
          shift 2;;
       (--work|-w)
+         test $# == 1 && fail "$1 needs an argument"
          WORK=$(readlink -f $2)
+         mkdir -p $WORK || fail "cannot write to $WORK"
          shift 2;;
       (--target|-t)
+         test $# == 1 && fail "$1 needs an argument"
          TARGET="$2"
          shift 2;;
+      (--timeout|-t)
+         test $# == 1 && fail "$1 needs an argument"
+         TIMEOUT=$2
+         shift 2;;
       (--processes|-j)
+         test $# == 1 && fail "$1 needs an argument"
          THREADS=$2
          shift 2;;
       (--size|-n)
+         test $# == 1 && fail "$1 needs an argument"
          SETSIZE=$2
          shift 2;;
       (--fuzzer|-f)
+         test $# == 1 && fail "$1 needs an argument"
          FUZZER=$2
+         test -x "$FUZZER" || fail "$FUZZER is not executable"
          shift 2;;
       (*)
          # what this flag?
@@ -56,6 +74,8 @@ test -n "$FUZZER" || { test -x /usr/bin/radamsa && FUZZER=/usr/bin/radamsa || FU
 test -n "$WORK" || fail "You need to give a work directory with --work. This is where needed tools, data and results will be put. You can use the same one across runs."
 test -n "$TARGET" || fail "You need to give a target binary with --target"
 test -d "$SAMPLES" || fail "You need to give a samples directory"
+test $(ls $samples | wc -l) = 0 && touch $SAMPLES/tabularasa.file
+
 
 mkdir -p $WORK
 cd $WORK
@@ -123,7 +143,7 @@ do
    do
       test -f $foo.coverage && continue
       # do this in parallel soonish
-      (ulimit -t 10;
+      (ulimit -t $TIMEOUT;
        mkdir $foo.dir;
        cp $foo $foo.dir;
        cd $foo.dir;
