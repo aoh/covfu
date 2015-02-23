@@ -42,9 +42,9 @@ do
          WORK=$(readlink -f $2)
          mkdir -p $WORK || fail "cannot write to $WORK"
          shift 2;;
-      (--target|-t)
+      (--command|-c)
          test $# == 1 && fail "$1 needs an argument"
-         TARGET="$2"
+         COMMAND="$2"
          shift 2;;
       (--timeout|-t)
          test $# == 1 && fail "$1 needs an argument"
@@ -72,7 +72,8 @@ done
 
 test -n "$FUZZER" || { test -x /usr/bin/radamsa && FUZZER=/usr/bin/radamsa || FUZZER=$WORK/bin/radamsa; }
 test -n "$WORK" || fail "You need to give a work directory with --work. This is where needed tools, data and results will be put. You can use the same one across runs."
-test -n "$TARGET" || fail "You need to give a target binary with --target"
+test -n "$COMMAND" || fail "You need to give a target command with --target"
+echo "$COMMAND" | grep -q "TESTCASE" || fail "command needs to contain the string TESTCASE, to be replaced with testcase file name"
 test -d "$SAMPLES" || fail "You need to give a samples directory"
 test $(ls $samples | wc -l) = 0 && touch $SAMPLES/tabularasa.file
 
@@ -147,9 +148,11 @@ do
        mkdir $foo.dir;
        cp $foo $foo.dir;
        cd $foo.dir;
-       ASAN_OPTIONS=detect_leaks=0:coverage=1 $TARGET "$foo" 2>"../$foo.asan" > /dev/null &
+       CMD=$(echo $COMMAND | sed -e "s/TESTCASE/$foo/")
+       ASAN_OPTIONS=detect_leaks=0:coverage=1 $CMD "$foo" 2>"../$foo.asan" > /dev/null &
        PID=$!;
        wait;
+       #sancov.py unpack *.packed &>/dev/null
        for LOG in *.$PID.sancov
        do
          NAME=$(echo $LOG | sed -e 's/\..*//')
