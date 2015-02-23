@@ -209,7 +209,7 @@ do
    TESTS=$($OL -e "(+ $SETSIZE $TESTS)")
    RATE=$($OL -e "(round (/ (- (time-ms) $START) $TESTS))")
 
-   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $($LINES --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $POOLSIZE for $TARGET"
+   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $($LINES --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $POOLSIZE for '$COMMAND'"
 
 done
 
