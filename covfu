@@ -89,6 +89,7 @@ test -x /usr/bin/ol && OL=/usr/bin/ol
 test -x /usr/bin/lines && LINES=/usr/bin/lines
 
 echo "Checking and possibly building tools on the first run. This may take a few minutes."
+echo "You can install ol, radamsa and lines globally, or copy them to work/bin, to avoid this."
 test -x $OL || ( cd src; git clone https://github.com/aoh/owl-lisp.git && cd owl-lisp && make PREFIX=$WORK install; )
 echo " - $OL"
 test -x $FUZZER || ( cd src; git clone https://github.com/aoh/radamsa && cd radamsa && make OL=$OL PREFIX=$WORK install; ) &
@@ -96,25 +97,31 @@ echo " - $FUZZER"
 test -x $LINES || ( cd src; git clone https://github.com/aoh/lines && cd lines && make OL=$OL PREFIX=$WORK install; ) &
 echo " - $LINES"
 wait
-SUFFIX=$(ls $SAMPLES | head -n 1 | sed -e 's/.*\.//')
+
+SUFFIXES=$(ls --color=never $SAMPLES | sed -e 's/.*\.//' | sort | uniq)
 
 PATH=$WORK/bin:$PATH
 
 echo "SAMPLES=$SAMPLES"
-echo "TARGET=$TARGET"
+echo "COMMAND=$COMMAND"
 echo "WORK=$WORK"
-echo "SUFFIX=$SUFFIX"
 echo "THREADS=$THREADS"
+echo "SUFFIXES=$SUFFIXES"
 
+echo "[sleeping for 3 seconds]"
+sleep 3
 
 ##
 ## Import and sanitize sample paths to work folder
 ##
 
-for foo in $SAMPLES/*
+for SUFFIX in $SUFFIXES
 do
-   SUM=`md5sum $foo | sed -e 's/ .*//'`
-   cp -v "$foo" "fuzz/$SUM.$SUFFIX"
+   for foo in $SAMPLES/*.$SUFFIX
+   do
+      SUM=`md5sum $foo | sed -e 's/ .*//'`
+      cp -v "$foo" "fuzz/$SUM.$SUFFIX"
+   done
 done
 
 
@@ -129,7 +136,6 @@ done
 
 cd $WORK/fuzz
 
-
 START=$($OL -e '(time-ms)')
 TESTS=0
 RATE=0
@@ -137,80 +143,83 @@ RATE=0
 while true
 do
 
-   $FUZZER -o new/fuzz-%n.$SUFFIX -n $SETSIZE *.$SUFFIX &
-
-   ## Compute missing coverages
-   for foo in *.$SUFFIX
+   for SUFFIX in $SUFFIXES
    do
-      test -f $foo.coverage && continue
-      # do this in parallel soonish
-      (ulimit -t $TIMEOUT;
-       mkdir $foo.dir;
-       cp $foo $foo.dir;
-       cd $foo.dir;
-       CMD=$(echo $COMMAND | sed -e "s/TESTCASE/$foo/")
-       ASAN_OPTIONS=detect_leaks=0:coverage=1 $CMD "$foo" 2>"../$foo.asan" > /dev/null &
-       PID=$!;
-       wait;
-       #sancov.py unpack *.packed &>/dev/null
-       for LOG in *.$PID.sancov
-       do
-         NAME=$(echo $LOG | sed -e 's/\..*//')
-         od -w4 -t x4 $LOG  | sed -e "s/.* /$NAME-/" | grep $NAME >> "../$foo.coverage"
-       done;
-       cd ..;
-       ) &
-       waitnjobs $THREADS
-   done
-   wait
-   chmod -R u+rwx fuzz-*.dir
-   rm -rf *.dir
 
-   ## Check for issues
-   for log in $(grep "ERROR: Addr" *.asan | sed -e 's/:.*//' | uniq)
-   do
-      FILE=$(echo $log | sed -e 's/\.asan//')
-      CAUSE=$(grep "ERROR: Addr" $log | head -n 1 | sed -re 's/.*ERROR: AddressSanitizer: ([^ ]*).*pc [^ ]*([^ ]{3}).*/\1_\2/' | sed -e 's/[^a-zA-Z0-9_-]/_/g')
-      cp $FILE ../issues/$CAUSE.$SUFFIX
-      cp $log ../issues/$CAUSE.$SUFFIX.asan
-   done
+	   $FUZZER -o new/fuzz-%n.$SUFFIX -n $SETSIZE *.$SUFFIX &
+	
+	   ## Compute missing coverages
+	   for foo in *.$SUFFIX
+	   do
+	      test -f $foo.coverage && continue
+	      (ulimit -t $TIMEOUT;
+	       mkdir $foo.dir;
+	       cp $foo $foo.dir;
+	       cd $foo.dir;
+	       CMD=$(echo $COMMAND | sed -e "s/TESTCASE/$foo/")
+	       ASAN_OPTIONS=detect_leaks=0:coverage=1 $CMD 2>"../$foo.asan" > /dev/null &
+	       PID=$!;
+	       wait;
+	       #sancov.py unpack *.packed &>/dev/null
+	       for LOG in *.$PID.sancov
+	       do
+	         NAME=$(echo $LOG | sed -e 's/\..*//')
+	         od -w4 -t x4 $LOG  | sed -e "s/.* /$NAME-/" | grep $NAME >> "../$foo.coverage"
+	       done;
+	       cd ..;
+	       ) &
+	       waitnjobs $THREADS
+	   done
+	   wait
+	   chmod -R u+rwx *.dir
+	   rm -rf *.dir
+	
+	   ## Check for issues
+	   for log in $(grep "ERROR: Addr" *.asan | sed -e 's/:.*//' | uniq)
+	   do
+	      FILE=$(echo $log | sed -e 's/\.asan//')
+	      CAUSE=$(grep "ERROR: Addr" $log | head -n 1 | sed -re 's/.*ERROR: AddressSanitizer: ([^ ]*).*pc [^ ]*([^ ]{3}).*/\1_\2/' | sed -e 's/[^a-zA-Z0-9_-]/_/g')
+	      cp $FILE ../issues/$CAUSE.$SUFFIX
+	      cp $log ../issues/$CAUSE.$SUFFIX.asan
+	   done
+	
+	   ## Compute the next generation to fuzz/next
+	   for foo in $($LINES --cover *.coverage)
+	   do
+	      FILE=$(echo "$foo" | sed -e 's/\.coverage$//')
+	      mv "$foo" "$FILE" next
+	   done
+	
+	   ## Clear old generation
+	   rm *.$SUFFIX.* *.$SUFFIX
+	
+	   ## Sanitize the names of next generation files (to avoid collisions)
+	   cd next
+	   # rename and move files from current generation
+	   for file in fuzz-*.$SUFFIX 
+	   do
+	      echo "$file" | grep -q "\*" && break # no matches
+	      SUM=`md5sum $file | sed -e 's/ .*//'` 
+	      mv "$file" "../$SUM.$SUFFIX" 
+	      mv "$file.coverage" "../$SUM.$SUFFIX.coverage" 
+	   done
+	   # move files from previous generation
+	   for file in *.$SUFFIX
+	   do
+	      mv $file $file.coverage ..
+	   done
+	   cd ..
+	  
+	   POOLSIZE=$(ls *.$SUFFIX | wc -l)
 
-   ## Compute the next generation to fuzz/next
-   for foo in $($LINES --cover *.coverage)
-   do
-      FILE=$(echo "$foo" | sed -e 's/\.coverage$//')
-      mv "$foo" "$FILE" next
-   done
-
-   ## Clear old generation
-   rm *.*
-
-   ## Sanitize the names of next generation files (to avoid collisions)
-   cd next
-   # rename and move files from current generation
-   for file in fuzz-*.$SUFFIX 
-   do
-      echo "$file" | grep -q "\*" && break # no matches
-      SUM=`md5sum $file | sed -e 's/ .*//'` 
-      mv "$file" "../$SUM.$SUFFIX" 
-      mv "$file.coverage" "../$SUM.$SUFFIX.coverage" 
-   done
-   # move files form previous generation
-   for file in *.$SUFFIX
-   do
-      mv $file $file.coverage ..
-   done
-   cd ..
-  
-   POOLSIZE=$(ls *.$SUFFIX | wc -l)
-
-   mv new/* .
-
-   TESTS=$($OL -e "(+ $SETSIZE $TESTS)")
-   RATE=$($OL -e "(round (/ (- (time-ms) $START) $TESTS))")
-
-   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $($LINES --union *.coverage | wc -l) blocks, $(ls ../issues/*.$SUFFIX 2>/dev/null | wc -l) issues found, pool size $POOLSIZE for '$COMMAND'"
-
-done
-
-
+      # get new files for next round (of this suffix)
+	   mv new/*.$SUFFIX .
+	
+	   TESTS=$($OL -e "(+ $SETSIZE $TESTS)")
+	   RATE=$($OL -e "(round (/ (- (time-ms) $START) $TESTS))")
+	
+	   echo "$(date +'%Y.%m.%d %H:%M') $TESTS cases tested (${RATE}ms/test), $($LINES --union *.$SUFFIX.coverage | wc -l) blocks for $SUFFIX, $(ls ../issues/ 2>/dev/null | grep -v \.asan | wc -l) issues found, pool size $POOLSIZE for '$(echo \"$COMMAND\" | sed -e 's/ .*//')'"
+	
+	done
+done	
+	
